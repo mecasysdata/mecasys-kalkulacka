@@ -9,6 +9,15 @@ st.title("TEST APLIKÁCIE – KROK 1")
 st.write("Overíme načítanie všetkých Google Sheets, modelov a ich vstupov.")
 
 # -----------------------------
+# Cesty k modelom
+# -----------------------------
+M1_MODEL_PATH = "MECASYS_APP/finaly_model.json"
+M1_COLUMNS_PATH = "MECASYS_APP/stlpce_modelu.pkl"
+
+M2_MODEL_PATH = "MECASYS_APP/xgb_model_cena.json"
+M2_COLUMNS_PATH = "MECASYS_APP/model_columns.pkl"
+
+# -----------------------------
 # URL Google Sheets
 # -----------------------------
 URLS = {
@@ -49,19 +58,18 @@ st.header("2️⃣ Test načítania modelu M1 (čas)")
 
 try:
     m1 = XGBRegressor()
-    m1.load_model("finaly_model.json")  # ← opravený názov
+    m1.load_model(M1_MODEL_PATH)
     st.success("Model M1 načítaný!")
 except Exception as e:
     st.error(f"Chyba pri načítaní modelu M1: {e}")
 
 try:
-    with open("stlpce_modelu.pkl", "rb") as f:  # ← opravený názov
+    with open(M1_COLUMNS_PATH, "rb") as f:
         cols_m1 = pickle.load(f)
     st.success("Stĺpce M1 načítané!")
 
     st.write("### Vstupy modelu M1:")
     st.write(cols_m1)
-
     st.write("### Počet vstupov:", len(cols_m1))
 
 except Exception as e:
@@ -74,19 +82,18 @@ st.header("3️⃣ Test načítania modelu M2 (cena)")
 
 try:
     m2 = XGBRegressor()
-    m2.load_model("xgb_model_cena.json")
+    m2.load_model(M2_MODEL_PATH)
     st.success("Model M2 načítaný!")
 except Exception as e:
     st.error(f"Chyba pri načítaní modelu M2: {e}")
 
 try:
-    with open("model_columns.pkl", "rb") as f:  # ← opravený názov
+    with open(M2_COLUMNS_PATH, "rb") as f:
         cols_m2 = pickle.load(f)
     st.success("Stĺpce M2 načítané!")
 
     st.write("### Vstupy modelu M2:")
     st.write(cols_m2)
-
     st.write("### Počet vstupov:", len(cols_m2))
 
 except Exception as e:
