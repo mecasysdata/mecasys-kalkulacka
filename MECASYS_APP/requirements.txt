@@ -1,5 +1,5 @@
 streamlit
 pandas
+numpy
+fpdf
 st-gsheets-connection
-xgboost
-joblib
