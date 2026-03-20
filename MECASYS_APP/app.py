@@ -6,154 +6,117 @@ import joblib
 from streamlit_gsheets import GSheetsConnection
 from datetime import datetime
 
-# --- 1. KONFIGURÁCIA STRÁNKY ---
+# --- 1. NASTAVENIA ---
 st.set_page_config(page_title="MECASYS Kalkulátor", layout="wide")
-st.title("📊 MECASYS - Inteligentný systém riadenia ponúk")
+st.title("📊 MECASYS - Inteligentná kalkulácia cien")
 
-# --- 2. NAČÍTANIE MODELOV (STRIKTNÉ) ---
-# Program vyžaduje existenciu týchto súborov v rovnakom priečinku
-try:
-    # Model M1 (Čas)
-    model_cas = xgb.Booster()
-    model_cas.load_model('finalny_model.json')
-    cols_cas = joblib.load('stlpce_modelu.pkl')
+# --- 2. NAČÍTANIE MODELOV (Strikné podľa GitHubu) ---
+@st.cache_resource
+def load_models():
+    m1 = xgb.Booster(); m1.load_model('finalny_model.json')
+    c1 = joblib.load('stlpce_modelu.pkl')
+    m2 = xgb.Booster(); m2.load_model('xgb_model_cena.json')
+    c2 = joblib.load('model_columns.pkl')
+    return m1, c1, m2, c2
 
-    # Model M2 (Cena)
-    model_cena = xgb.Booster()
-    model_cena.load_model('xgb_model_cena.json')
-    cols_cena = joblib.load('model_columns.pkl')
-except Exception as e:
-    st.error(f"Chyba pri načítaní AI modelov: {e}")
-    st.stop()
+model_cas, cols_cas, model_cena, cols_cena = load_models()
 
-# --- 3. PREPOJENIE NA GOOGLE SHEETS (Bod 35 vo Worde) ---
+# --- 3. PRIPOJENIE TABULIEK (Bod 35) ---
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# Načítanie všetkých 4 potrebných zdrojov
 df_materialy = conn.read(worksheet="material_cena")
 df_kooperacie = conn.read(worksheet="kooperacie_cennik")
 df_lojalita = conn.read(worksheet="zakaznik_lojalita")
 df_databaza = conn.read(worksheet="databaza_ponuk")
 
-# --- 4. VSTUPNÉ ÚDAJE (Bod 1-10 vo Worde) ---
-st.header("1. Zadanie parametrov dielu")
-c1, c2, c3 = st.columns(3)
+# --- 4. VSTUPY (Bod 1-10) ---
+st.header("1. Parametre komponentu")
+col1, col2, col3 = st.columns(3)
 
-with c1:
-    zakaznik = st.selectbox("Vyber zákazníka", df_lojalita["Meno"].unique())
-    cislo_cp = st.text_input("Číslo cenovej ponuky (CP)")
-    polozka_item = st.text_input("Názov dielu / ITEM")
+with col1:
+    zakaznik = st.selectbox("Zákazník", df_lojalita["Meno"].unique())
+    cislo_cp = st.text_input("Číslo CP")
+    item_nazov = st.text_input("ITEM / Názov dielu")
 
-with c2:
-    d = st.number_input("Priemer (d) [mm]", min_value=0.0, format="%.2f", step=0.1)
-    l = st.number_input("Dĺžka (l) [mm]", min_value=0.0, format="%.2f", step=0.1)
+with col2:
+    d = st.number_input("Priemer d [mm]", min_value=0.0, format="%.2f")
+    l = st.number_input("Dĺžka l [mm]", min_value=0.0, format="%.2f")
     pocet_kusov = st.number_input("Počet kusov [ks]", min_value=1, step=1)
 
-with c3:
-    zoznam_mat = df_materialy["Materiál"].unique()
-    vybrany_mat = st.selectbox("Materiál polotovaru", zoznam_mat)
+with col3:
+    vybrany_mat = st.selectbox("Materiál", df_materialy["Materiál"].unique())
 
-# --- 5. GEOMETRICKÉ VÝPOČTY A MATERIÁL ---
-# Plocha plášťa (zatiaľ v mm2)
+# --- 5. GEOMETRIA A MATERIÁL (Stĺpce G, H, O) ---
 plocha_plasta_mm2 = math.pi * d * l
-# Objem pre výpočet hmotnosti
 objem_mm3 = math.pi * ((d / 2) ** 2) * l
 
-# Vyhľadanie dát o materiáli z df_materialy
 row_mat = df_materialy[df_materialy["Materiál"] == vybrany_mat].iloc[0]
 hustota = row_mat["Hustota"]
-cena_mat_kg = row_mat["Cena_za_kg"]
+cena_kg = row_mat["Cena_za_kg"]
 
-hmotnost_ks = objem_mm3 * hustota
-naklad_material_O = hmotnost_ks * cena_mat_kg
+hmotnost_kg = objem_mm3 * hustota # Stĺpec G
+naklad_material_O = hmotnost_kg * cena_kg # Stĺpec O
 
-# --- 6. LOGIKA KOOPERÁCIE (S PREVODOM NA dm2) ---
-st.header("2. Externé spracovanie (Kooperácia)")
-kooperacia_ano = st.radio("Vyžaduje komponent kooperáciu?", ["Nie", "Áno"])
-
+# --- 6. KOOPERÁCIA (Stĺpec P + Prevod na dm2) ---
+st.header("2. Kooperácia")
+kooperacia_ano = st.checkbox("Vyžaduje komponent kooperáciu?")
 naklad_kooperacia_P = 0.0
 
-if kooperacia_ano == "Áno":
+if kooperacia_ano:
     druh_koop = st.selectbox("Druh kooperácie", df_kooperacie["Druh"].unique())
+    row_koop = df_kooperacie[df_kooperacie["Druh"] == druh_koop].iloc[0]
     
-    # Filter cenníka podľa druhu a materiálu
-    try:
-        mask = (df_kooperacie["Druh"] == druh_koop)
-        row_koop = df_kooperacie[mask].iloc[0]
-        
-        tarifa = row_koop["Tarifa"]
-        jednotka = row_koop["Jednotka"]
-        min_zakazka = row_koop["Min_zakazka"]
-        
-        # Výpočet odhadu (Tu prebieha prevod na dm2)
-        if jednotka == "kg":
-            odhad_koop = tarifa * hmotnost_ks
-        elif jednotka == "dm2":
-            plocha_dm2 = plocha_plasta_mm2 / 10000
-            odhad_koop = tarifa * plocha_dm2
-        
-        # Kontrola minimálnej zákazky
-        if (odhad_koop * pocet_kusov) < min_zakazka:
-            naklad_kooperacia_P = min_zakazka / pocet_kusov
-            st.warning(f"Uplatnená minimálna zákazka: {naklad_kooperacia_P:.4f} €/ks")
-        else:
-            naklad_kooperacia_P = odhad_koop
-            st.success(f"Vypočítaný náklad: {naklad_kooperacia_P:.4f} €/ks")
-    except:
-        st.error("Dáta pre túto kombináciu kooperácie neboli nájdené v cenníku.")
-
-# --- 7. PREDIKCIA M1 (ČAS) ---
-vstupne_naklady_Q = naklad_material_O + naklad_kooperacia_P
-
-# Príprava dát pre XGBoost (názvy stĺpcov musia sedieť s cols_cas)
-input_cas_df = pd.DataFrame([[d, l, hmotnost_ks]], columns=['d', 'l', 'hmotnost'])
-d_cas = xgb.DMatrix(input_cas_df)
-predikovany_cas_R = model_cas.predict(d_cas)[0]
-
-# --- 8. PREDIKCIA M2 (CENA) A VALIDÁCIA TECHNOLÓGOM ---
-# Príprava dát pre M2
-input_cena_df = pd.DataFrame([[vstupne_naklady_Q, predikovany_cas_R]], columns=['vstupne_naklady', 'vypocitany_cas'])
-d_cena = xgb.DMatrix(input_cena_df)
-predikovana_cena_S = model_cena.predict(d_cena)[0]
-
-st.header("3. Výsledná kalkulácia a Validácia")
-col_res1, col_res2 = st.columns(2)
-
-with col_res1:
-    st.metric("Predikovaný strojný čas [R]", f"{predikovany_cas_R:.2f} min")
-    st.metric("Predikovaná cena modelu [S]", f"{predikovana_cena_S:.2f} €")
-
-with col_res2:
-    upravit_cenu = st.checkbox("Manuálna korekcia ceny (Technológ)")
-    if upravit_cenu:
-        finalna_cena_S = st.number_input("Upravená jednotková cena [€/ks]", value=float(predikovana_cena_S))
+    if row_koop["Jednotka"] == "dm2":
+        odhad = row_koop["Tarifa"] * (plocha_plasta_mm2 / 10000)
     else:
-        finalna_cena_S = predikovana_cena_S
+        odhad = row_koop["Tarifa"] * hmotnost_kg
+        
+    # Kontrola min. zákazky
+    if (odhad * pocet_kusov) < row_koop["Min_zakazka"]:
+        naklad_kooperacia_P = row_koop["Min_zakazka"] / pocet_kusov
+    else:
+        naklad_kooperacia_P = odhad
 
-# Celková cena za položku
-cena_spolu_U = finalna_cena_S * pocet_kusov
-st.subheader(f"Konečná cena položky [U]: {cena_spolu_U:.2f} €")
+vstupne_naklady_Q = naklad_material_O + naklad_kooperacia_P # Stĺpec Q
 
-# --- 9. ZÁPIS DO DATABÁZY (A-U) ---
-if st.button("💾 ULOŽIŤ A GENEROVAŤ ZÁZNAM"):
+# --- 7. PREDIKCIA (M1, M2) ---
+# M1: Čas (R)
+in_cas = pd.DataFrame([[d, l, hmotnost_kg]], columns=['d', 'l', 'hmotnost'])
+pred_cas_R = model_cas.predict(xgb.DMatrix(in_cas))[0]
+
+# M2: Cena (S)
+in_cena = pd.DataFrame([[vstupne_naklady_Q, pred_cas_R]], columns=['vstupne_naklady', 'vypocitany_cas'])
+pred_cena_S = model_cena.predict(xgb.DMatrix(in_cena))[0]
+
+# --- 8. VALIDÁCIA TECHNOLÓGOM ---
+st.header("3. Výsledok a uloženie")
+c_v1, c_v2 = st.columns(2)
+with c_v1:
+    st.write(f"Odhadovaný čas: **{pred_cas_R:.2f} min**")
+    st.write(f"Modelom navrhnutá cena: **{pred_cena_S:.2f} €/ks**")
+with c_v2:
+    override = st.checkbox("Upraviť cenu manuálne")
+    jednotkova_cena_final = st.number_input("Finálna jednotková cena [€/ks]", value=float(pred_cena_S)) if override else pred_cena_S
+
+cena_spolu_U = jednotkova_cena_final * pocet_kusov
+
+# --- 9. ZÁPIS DO GOOGLE SHEETS (Stĺpce A-U) ---
+if st.button("💾 ULOŽIŤ PONUKU"):
     novy_riadok = pd.DataFrame([{
-        "Dátum": datetime.now().strftime("%d.%m.%Y"),
-        "Zákazník": zakaznik,
-        "Číslo CP": cislo_cp,
-        "ITEM": polozka_item,
-        "Priemer d": d,
-        "Dĺžka l": l,
-        "Hmotnosť [kg]": hmotnost_ks,
-        "Náklad materiál [O]": naklad_material_O,
-        "Náklad kooperácia [P]": naklad_kooperacia_P,
-        "Vstupné náklady [Q]": vstupne_naklady_Q,
-        "Čas [R]": predikovany_cas_R,
-        "Jednotková cena [S]": finalna_cena_S,
-        "Počet kusov [T]": pocet_kusov,
-        "Cena spolu [U]": cena_spolu_U
+        "A-Dátum": datetime.now().strftime("%d.%m.%Y"),
+        "B-Číslo CP": cislo_cp,
+        "C-Zákazník": zakaznik,
+        "D-ITEM": item_nazov,
+        "G-Hmotnosť": hmotnost_kg,
+        "O-Náklad materiál": naklad_material_O,
+        "P-Náklad kooperácia": naklad_kooperacia_P,
+        "Q-Vstupné náklady": vstupne_naklady_Q,
+        "R-Predikovaný čas": pred_cas_R,
+        "S-Jednotková cena": jednotkova_cena_final,
+        "T-Počet kusov": pocet_kusov,
+        "U-Cena spolu": cena_spolu_U
     }])
     
-    # Pridanie riadku do Google Sheets
     updated_df = pd.concat([df_databaza, novy_riadok], ignore_index=True)
     conn.update(worksheet="databaza_ponuk", data=updated_df)
-    st.success("Ponuka bola zapísaná do centrálnej databázy.")
+    st.success("Dáta boli zapísané do tabuľky.")
