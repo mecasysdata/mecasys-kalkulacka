@@ -15,11 +15,8 @@ URLS = {
     "databaza_ponuk": "https://docs.google.com/spreadsheets/d/e/2PACX-1vRfPBZ4TCpQyiqybU0ADu3AMwHCi2qOKifQAOnnTWnorVNJ1SVxtN6zJzXthOxCVwtXWp__Bp_-nto0/pub?gid=0&single=true&output=csv",
     "kooperacie_cennik": "https://docs.google.com/spreadsheets/d/e/2PACX-1vRfPBZ4TCpQyiqybU0ADu3AMwHCi2qOKifQAOnnTWnorVNJ1SVxtN6zJzXthOxCVwtXWp__Bp_-nto0/pub?gid=1180392224&single=true&output=csv",
     "material_akost_hustota": "https://docs.google.com/spreadsheets/d/e/2PACX-1vRfPBZ4TCpQyiqybU0ADu3AMwHCi2qOKifQAOnnTWnorVNJ1SVxtN6zJzXthOxCVwtXWp__Bp_-nto0/pub?gid=1281008948&single=true&output=csv",
-
-    # ✔️ sem som vložil tvoje nové URL
     "material_cena": "https://docs.google.com/spreadsheets/d/e/2PACX-1vRfPBZ4TCpQyiqybU0ADu3AMwHCi2qOKifQAOnnTWnorVNJ1SVxtN6zJzXthOxCVwtXWp__Bp_-nto0/pub?gid=901617097&single=true&output=csv",
-
-    "zakaznik_lojalita": "https://docs.google.com/spreadsheets/d/e/2PACX-1vRfPBZ4TCpQyiqybU0ADu3AMwHCi2qOKifQAOnnTWnorVN1SVxtN6zJzXthOxCVwtXWp__Bp_-nto0/pub?gid=324957857&single=true&output=csv",
+    "zakaznik_lojalita": "https://docs.google.com/spreadsheets/d/e/2PACX-1vRfPBZ4TCpQyiqybU0ADu3AMwHCi2qOKifQAOnnTWnorVNJ1SVxtN6zJzXthOxCVwtXWp__Bp_-nto0/pub?gid=324957857&single=true&output=csv",
 }
 
 # -----------------------------
@@ -52,13 +49,13 @@ st.header("2️⃣ Test načítania modelu M1 (čas)")
 
 try:
     m1 = XGBRegressor()
-    m1.load_model("finalny_model.json")
+    m1.load_model("finaly_model.json")  # ← opravený názov
     st.success("Model M1 načítaný!")
 except Exception as e:
     st.error(f"Chyba pri načítaní modelu M1: {e}")
 
 try:
-    with open("stlpce_modelu.pkl", "rb") as f:
+    with open("stlpce_modelu.pkl", "rb") as f:  # ← opravený názov
         cols_m1 = pickle.load(f)
     st.success("Stĺpce M1 načítané!")
 
@@ -83,7 +80,7 @@ except Exception as e:
     st.error(f"Chyba pri načítaní modelu M2: {e}")
 
 try:
-    with open("model.columns.pkl", "rb") as f:
+    with open("model_columns.pkl", "rb") as f:  # ← opravený názov
         cols_m2 = pickle.load(f)
     st.success("Stĺpce M2 načítané!")
 
