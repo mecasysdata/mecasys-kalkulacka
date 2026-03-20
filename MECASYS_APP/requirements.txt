@@ -4,3 +4,4 @@ numpy
 xgboost
 st-gsheets-connection
 reportlab
+scikit-learn
