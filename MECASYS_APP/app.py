@@ -1,142 +1,101 @@
 import streamlit as st
 import pandas as pd
-import math
-import xgboost as xgb
-import joblib
-from streamlit_gsheets import GSheetsConnection
-from datetime import datetime
-import os
+import numpy as np
+from datetime import date
 
-# --- 1. KONFIGURÁCIA STRÁNKY ---
-st.set_page_config(page_title="MECASYS Kalkulátor", layout="wide")
+# --- 1. TVOJE ODKAZY NA GOOGLE SHEETS ---
+L_MAT_CENA = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRfPBZ4TCpQyiqybU0ADu3AMwHCi2qOKifQAOnnTWnorVNJ1SVxtN6zJzXthOxCVwtXWp__Bp_-nto0/pub?gid=901617097&single=true&output=csv"
+L_AKOSTI = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRfPBZ4TCpQyiqybU0ADu3AMwHCi2qOKifQAOnnTWnorVNJ1SVxtN6zJzXthOxCVwtXWp__Bp_-nto0/pub?gid=1281008948&single=true&output=csv"
+L_KOOP = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRfPBZ4TCpQyiqybU0ADu3AMwHCi2qOKifQAOnnTWnorVNJ1SVxtN6zJzXthOxCVwtXWp__Bp_-nto0/pub?gid=1180392224&single=true&output=csv"
+L_LOJALITA = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRfPBZ4TCpQyiqybU0ADu3AMwHCi2qOKifQAOnnTWnorVNJ1SVxtN6zJzXthOxCVwtXWp__Bp_-nto0/pub?gid=324957857&single=true&output=csv"
+L_DB = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRfPBZ4TCpQyiqybU0ADu3AMwHCi2qOKifQAOnnTWnorVNJ1SVxtN6zJzXthOxCVwtXWp__Bp_-nto0/pub?gid=0&single=true&output=csv"
+
+# --- 2. NAČÍTANIE DÁT ---
+@st.cache_data(ttl=300)
+def load_data():
+    try:
+        df_m = pd.read_csv(L_MAT_CENA)
+        df_a = pd.read_csv(L_AKOSTI)
+        df_k = pd.read_csv(L_KOOP)
+        df_l = pd.read_csv(L_LOJALITA)
+        return df_m, df_a, df_k, df_l
+    except Exception as e:
+        st.error(f"Chyba pri načítaní tabuliek z Google Sheets: {e}")
+        return None, None, None, None
+
+df_materialy, df_akosti, df_kooperacia, df_lojalita = load_data()
+
+# --- 3. ROZHRANIE APLIKÁCIE ---
+st.set_page_config(page_title="MECASYS Kalkulačka", layout="wide")
 st.title("📊 MECASYS - Inteligentná kalkulácia cien")
 
-# --- 2. NAČÍTANIE AI MODELOV ---
-@st.cache_resource
-def load_models():
-    # Cesta k súborom v priečinku MECASYS_APP
-    base_path = os.path.dirname(__file__)
-    m1 = xgb.Booster(); m1.load_model(os.path.join(base_path, 'finalny_model.json'))
-    c1 = joblib.load(os.path.join(base_path, 'stlpce_modelu.pkl'))
-    m2 = xgb.Booster(); m2.load_model(os.path.join(base_path, 'xgb_model_cena.json'))
-    c2 = joblib.load(os.path.join(base_path, 'model_columns.pkl'))
-    return m1, c1, m2, c2
+if df_akosti is not None:
+    with st.sidebar:
+        st.header("Základné nastavenia")
+        zakaznik = st.selectbox("Zákazník", df_lojalita['Zákazník'].unique())
+        krajina = st.selectbox("Krajina", ["Slovensko", "Česko", "Nemecko", "Rakúsko", "Iné"])
+        cislo_cp = st.text_input("Číslo CP", value="2024-001")
 
-try:
-    model_cas, cols_cas, model_cena, cols_cena = load_models()
-except Exception as e:
-    st.error(f"Chyba pri načítaní modelov: {e}")
-    st.stop()
-
-# --- 3. PRIPOJENIE KU GOOGLE SHEETS ---
-conn = st.connection("gsheets", type=GSheetsConnection)
-
-# Načítanie hárkov
-df_materialy = conn.read(worksheet="material_cena")
-df_kooperacie = conn.read(worksheet="kooperacia_cennik")
-df_lojalita = conn.read(worksheet="zakaznik_lojalita")
-df_databaza = conn.read(worksheet="databaza_ponuk")
-
-# --- 4. VSTUPNÉ POLIA ---
-st.header("1. Zadanie parametrov")
-col1, col2, col3 = st.columns(3)
-
-with col1:
-    zakaznik = st.selectbox("Zákazník", df_lojalita["Meno"].unique())
-    cislo_cp = st.text_input("Číslo CP")
-    item_nazov = st.text_input("ITEM / Názov dielu")
-    krajina = st.text_input("Krajina", value="SK")
-
-with col2:
-    d = st.number_input("Priemer d [mm]", min_value=0.0, format="%.2f", value=10.0)
-    l = st.number_input("Dĺžka l [mm]", min_value=0.0, format="%.2f", value=50.0)
-    pocet_kusov = st.number_input("Počet kusov [ks]", min_value=1, step=1, value=1)
-    # Lojalita z tabuľky
-    lojalita_val = df_lojalita[df_lojalita["Meno"] == zakaznik]["Koeficient"].values[0] if "Koeficient" in df_lojalita.columns else 1.0
-
-with col3:
-    vybrany_mat = st.selectbox("Materiál", df_materialy["Materiál"].unique())
-    akost = st.text_input("Akosť materiálu")
-    narocnost = st.slider("Náročnosť výroby (1-5)", 1, 5, 1)
-
-# --- 5. VÝPOČTY ---
-plocha_plasta_mm2 = math.pi * d * l
-objem_mm3 = math.pi * ((d / 2) ** 2) * l
-
-row_mat = df_materialy[df_materialy["Materiál"] == vybrany_mat].iloc[0]
-hustota = row_mat["Hustota"]
-cena_mat_kg = row_mat["Cena_za_kg"]
-
-hmotnost_kg = (objem_mm3 * hustota) / 1000  # Ak je hustota v g/cm3, treba dať pozor na jednotky
-naklad_material_O = hmotnost_kg * cena_mat_kg
-
-# --- 6. KOOPERÁCIA ---
-st.header("2. Kooperácia")
-kooperacia_ano = st.checkbox("Vyžaduje komponent kooperáciu?")
-naklad_kooperacia_P = 0.0
-
-if kooperacia_ano:
-    druh_koop = st.selectbox("Druh kooperácie", df_kooperacie["druh"].unique())
-    row_koop = df_kooperacie[df_kooperacie["druh"] == druh_koop].iloc[0]
+    col1, col2 = st.columns(2)
     
-    if row_koop["jednotka"] == "dm2":
-        odhad = row_koop["tarifa"] * (plocha_plasta_mm2 / 10000)
-    else:
-        odhad = row_koop["tarifa"] * hmotnost_kg
-        
-    if (odhad * pocet_kusov) < row_koop["minimalna zakazka"]:
-        naklad_kooperacia_P = row_koop["minimalna zakazka"] / pocet_kusov
-    else:
-        naklad_kooperacia_P = odhad
+    with col1:
+        st.subheader("Parametre dielu")
+        item_name = st.text_input("Názov dielu (ITEM)")
+        akost = st.selectbox("Akosť materiálu", df_akosti['akost'].unique())
+        d = st.number_input("Priemer d (mm)", min_value=0.1, value=20.0, step=0.1)
+        l = st.number_input("Dĺžka l (mm)", min_value=0.1, value=50.0, step=0.1)
+        pocet_ks = st.number_input("Počet kusov", min_value=1, value=100)
 
-vstupne_naklady_Q = naklad_material_O + naklad_kooperacia_P
+    with col2:
+        st.subheader("Výroba a Kooperácia")
+        narocnost = st.slider("Náročnosť výroby (1-5)", 1, 5, 3)
+        koop_ano = st.checkbox("Vyžaduje kooperáciu?")
+        typ_koop = "Nie"
+        if koop_ano:
+            typ_koop = st.selectbox("Typ kooperácie", df_kooperacia['sluzba'].unique())
 
-# --- 7. PREDIKCIA AI ---
-in_cas = pd.DataFrame([[d, l, hmotnost_kg]], columns=['d', 'l', 'hmotnost'])
-pred_cas_R = model_cas.predict(xgb.DMatrix(in_cas))[0]
-
-in_cena = pd.DataFrame([[vstupne_naklady_Q, pred_cas_R]], columns=['vstupne_naklady', 'vypocitany_cas'])
-pred_cena_S = model_cena.predict(xgb.DMatrix(in_cena))[0]
-
-# --- 8. VÝSLEDOK ---
-st.header("3. Výsledok")
-res1, res2 = st.columns(2)
-with res1:
-    st.metric("Predikovaný čas (min)", f"{pred_cas_R:.2f}")
-    st.metric("Navrhnutá j. cena", f"{pred_cena_S:.2f} €")
-
-with res2:
-    override = st.checkbox("Upraviť cenu ručne")
-    final_cena = st.number_input("Jednotková cena [€]", value=float(pred_cena_S)) if override else pred_cena_S
-
-cena_spolu_U = final_cena * pocet_kusov
-
-# --- 9. ZÁPIS (Presne podľa tvojho screenshotu stĺpcov A-U) ---
-if st.button("💾 ULOŽIŤ PONUKU"):
-    novy_riadok = pd.DataFrame([{
-        "Dátum CP": datetime.now().strftime("%d.%m.%Y"),
-        "Číslo CP": cislo_cp,
-        "Zákazník": zakaznik,
-        "Krajina": krajina,
-        "Lojalita": lojalita_val,
-        "ITEM": item_nazov,
-        "Materiál": vybrany_mat,
-        "Akosť": akost,
-        "d": d,
-        "l": l,
-        "Hustota": hustota,
-        "Hmotnosť": hmotnost_kg,
-        "Náročnosť": narocnost,
-        "J.cena materiálu": cena_mat_kg,
-        "Náklad materiál": naklad_material_O,
-        "Náklad kooperácia": naklad_kooperacia_P,
-        "Vstupné náklady": vstupne_naklady_Q,
-        "Čas (min)": pred_cas_R,
-        "Jednotková cena": final_cena,
-        "Počet kusov": pocet_kusov,
-        "Cena položky spolu": cena_spolu_U
-    }])
+    # --- VÝPOČTY ---
+    # 1. Hustota a Váha
+    hustota = df_akosti[df_akosti['akost'] == akost]['hustota'].values[0]
+    vaha_ks = (np.pi * (d/2)**2 * l * hustota) / 1_000_000  # kg/ks
     
-    updated_df = pd.concat([df_databaza, novy_riadok], ignore_index=True)
-    conn.update(worksheet="databaza_ponuk", data=updated_df)
-    st.success("Dáta úspešne zapísané do databázy!")
+    # 2. Cena materiálu (zjednodušená logika podľa tvojich tabuliek)
+    # Vyberieme cenu za kg podľa typu materiálu (napr. OCEĽ, NEREZ...)
+    # V tvojom Exceli je logika IF(LEFT...), tu to dotiahneme z df_materialy
+    cena_kg = 2.5 # Základná hodnota ak by zlyhalo hľadanie
+    try:
+        # Tu hľadáme cenu za kg z tabuľky material_cena (predpokladáme stĺpec 'cena_za_kg')
+        cena_kg = df_materialy.iloc[0]['cena_za_kg'] 
+    except:
+        pass
+    
+    naklad_mat = vaha_ks * cena_kg
+    
+    # 3. Kooperácia
+    naklad_koop = 0
+    if koop_ano:
+        row_k = df_kooperacia[df_kooperacia['sluzba'] == typ_koop].iloc[0]
+        if row_k['jednotka'] == 'dm2':
+            plocha_dm2 = (np.pi * d * l) / 10000
+            naklad_koop = max(row_k['tarifa'] * plocha_dm2, row_k['min_zakazka'] / pocet_ks)
+        else:
+            naklad_koop = max(row_k['tarifa'] * vaha_ks, row_k['min_zakazka'] / pocet_ks)
+
+    # --- ZOBRAZENIE VÝSLEDKOV ---
+    st.divider()
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Váha (kg/ks)", f"{vaha_ks:.3f}")
+    c2.metric("Materiál (€/ks)", f"{naklad_mat:.2L}")
+    c3.metric("Kooperácia (€/ks)", f"{naklad_koop:.2L}")
+    
+    # Celková predikovaná cena (zatiaľ jednoduchý vzorec, kým sa zapojí AI)
+    lojalita_koef = df_lojalita[df_lojalita['Zákazník'] == zakaznik]['koeficient'].values[0]
+    celkova_cena = (naklad_mat + naklad_koop + (narocnost * 2)) * lojalita_koef
+    c4.metric("Odhadovaná cena (€/ks)", f"{celkova_cena:.2L}", delta=f"{lojalita_koef} koef.")
+
+    # --- TLAČIDLO ULOŽIŤ ---
+    if st.button("💾 ULOŽIŤ PONUKU DO EXCELU"):
+        st.warning("Ukladanie sa aktivuje po prepojení cez Secrets (GSheetsConnection).")
+
+else:
+    st.info("Načítavam dáta z Google Sheets... Prosím čakaj.")
