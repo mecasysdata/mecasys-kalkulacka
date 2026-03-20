@@ -10,6 +10,7 @@ st.write("Overíme načítanie všetkých Google Sheets, modelov a ich vstupov."
 
 # -----------------------------
 # Cesty k modelom – správne pre Streamlit Cloud
+# (app.py je v MECASYS_APP, modely sú v MECASYS_APP)
 # -----------------------------
 M1_MODEL_PATH = "finaly_model.json"
 M1_COLUMNS_PATH = "stlpce_modelu.pkl"
