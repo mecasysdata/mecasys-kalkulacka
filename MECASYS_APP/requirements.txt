@@ -2,5 +2,5 @@ streamlit
 pandas
 numpy
 xgboost
-streamlit-gsheets
+st-gsheets-connection
 reportlab
