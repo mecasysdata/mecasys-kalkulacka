@@ -9,13 +9,13 @@ st.title("TEST APLIKÁCIE – KROK 1")
 st.write("Overíme načítanie všetkých Google Sheets, modelov a ich vstupov.")
 
 # -----------------------------
-# Cesty k modelom
+# Cesty k modelom – správne pre Streamlit Cloud
 # -----------------------------
-M1_MODEL_PATH = "MECASYS_APP/finaly_model.json"
-M1_COLUMNS_PATH = "MECASYS_APP/stlpce_modelu.pkl"
+M1_MODEL_PATH = "finaly_model.json"
+M1_COLUMNS_PATH = "stlpce_modelu.pkl"
 
-M2_MODEL_PATH = "MECASYS_APP/xgb_model_cena.json"
-M2_COLUMNS_PATH = "MECASYS_APP/model_columns.pkl"
+M2_MODEL_PATH = "xgb_model_cena.json"
+M2_COLUMNS_PATH = "model_columns.pkl"
 
 # -----------------------------
 # URL Google Sheets
