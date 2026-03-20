@@ -2,4 +2,5 @@ streamlit
 pandas
 numpy
 xgboost
-fpdf
+streamlit-gsheets
+reportlab
