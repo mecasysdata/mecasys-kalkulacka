@@ -21,14 +21,14 @@ from reportlab.lib.styles import getSampleStyleSheet
 
 st.set_page_config(page_title="Predikcia ceny komponenty", layout="wide")
 
-# Public CSV linky (tak ako si poslala)
+# Public CSV linky
 URL_DATABAZA_CSV = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRfPBZ4TCpQyiqybU0ADu3AMwHCi2qOKifQAOnnTWnorVNJ1SVxtN6zJzXthOxCVwtXWp__Bp_-nto0/pub?gid=0&single=true&output=csv"
 URL_KOOPERACIE = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRfPBZ4TCpQyiqybU0ADu3AMwHCi2qOKifQAOnnTWnorVNJ1SVxtN6zJzXthOxCVwtXWp__Bp_-nto0/pub?gid=1180392224&single=true&output=csv"
 URL_MATERIAL_AKOST_HUSTOTA = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRfPBZ4TCpQyiqybU0ADu3AMwHCi2qOKifQAOnnTWnorVNJ1SVxtN6zJzXthOxCVwtXWp__Bp_-nto0/pub?gid=1281008948&single=true&output=csv"
 URL_MATERIAL_CENA = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRfPBZ4TCpQyiqybU0ADu3AMwHCi2qOKifQAOnnTWnorVNJ1SVxtN6zJzXthOxCVwtXWp__Bp_-nto0/pub?gid=901617097&single=true&output=csv"
 URL_ZAKAZNIK_LOJALITA = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRfPBZ4TCpQyiqybU0ADu3AMwHCi2qOKifQAOnnTWnorVNJ1SVxtN6zJzXthOxCVwtXWp__Bp_-nto0/pub?gid=324957857&single=true&output=csv"
 
-# Plná URL databázy pre GSheetsConnection (z tvojho zadania)
+# Plná URL databázy pre GSheetsConnection
 URL_DATABAZA_GSHEETS = "https://docs.google.com/spreadsheets/d/1kOAKlZRCsoIUn-_438n0NFjO0tQJ2td8VydXHGmV00U/edit"
 
 # Cesty k modelom v repozitári
@@ -87,7 +87,7 @@ def compute_hustota(material: str, akost: str, df_mat: pd.DataFrame) -> float:
     if material_u == "NEREZ":
         return 8000.0
     if material_u == "PLAST":
-        mask = (df_mat["material"].str.strip().str.upper() == "PLAST") & (
+        mask = (df_mat["material"].astype(str).str.strip().str.upper() == "PLAST") & (
             df_mat["akost"].astype(str).str.strip().str.upper() == akost_u
         )
         row = df_mat[mask]
@@ -334,132 +334,22 @@ def main():
             m1_columns=m1_columns,
         )
 
+        # M1 – predikcia času (log -> expm1)
         y_log = m1_model.predict(df_m1_input)
         cas_min = float(np.expm1(y_log)[0])
 
+        # Hmotnosť – deterministický výpočet
         hmotnost = hustota * (math.pi / 4.0) * (d / 1000.0) ** 2 * (l / 1000.0)
 
+        # Materiál – deterministický výpočet z cenníka
         j_cena_m, d_pouzite = find_material_price(d, akost, df_material_cena)
         if j_cena_m is None:
             naklad_material = st.number_input("Náklad materiál [€/ks] (ručný vstup)", min_value=0.0, value=0.0, step=0.1)
         else:
             naklad_material = (l / 1000.0) * j_cena_m
 
+        # Kooperácia – deterministický výpočet z cenníka
         if kooperacia_needed == "Áno" and druh_kooperacie is not None:
             naklad_kooperacia, _ = compute_kooperacia(
                 material=material,
-                druh_kooperacie=druh_kooperacie,
-                hmotnost=hmotnost,
-                plocha_plasta=plocha_plasta,
-                pocet_kusov=pocet_kusov,
-                df_koop=df_kooperacie,
-            )
-        else:
-            naklad_kooperacia = 0.0
-
-        vstupne_naklady = naklad_material + naklad_kooperacia
-
-        df_m2_input = prepare_m2_input_row(
-            cas_min=cas_min,
-            hmotnost=hmotnost,
-            plocha_prierezu=plocha_prierezu,
-            vstupne_naklady=vstupne_naklady,
-            krajina=krajina,
-            m2_columns=m2_columns,
-        )
-
-        y_log_cena = m2_model.predict(df_m2_input)
-        jednotkova_cena = float(np.expm1(y_log_cena)[0])
-
-        cena_polozky_spolu = jednotkova_cena * pocet_kusov
-
-        polozka = {
-            "Dátum CP": datum_cp,
-            "Číslo CP": cislo_cp,
-            "Zákazník": zakaznik_nazov,
-            "Krajina": krajina,
-            "Lojalita": lojalita,
-            "ITEM": item_nazov,
-            "Materiál": material,
-            "Akosť": akost,
-            "d": d,
-            "l": l,
-            "Hustota": hustota,
-            "Hmotnosť": hmotnost,
-            "Náročnosť": narocnost,
-            "J.cena materiálu": j_cena_m,
-            "Náklad materiál": naklad_material,
-            "Náklad kooperácia": naklad_kooperacia,
-            "Vstupné náklady": vstupne_naklady,
-            "Čas (min)": cas_min,
-            "Jednotková cena": jednotkova_cena,
-            "Počet kusov": pocet_kusov,
-            "Cena položky spolu": cena_polozky_spolu,
-        }
-        st.session_state["kosik"].append(polozka)
-
-    st.subheader("Košík položiek")
-
-    if st.session_state["kosik"]:
-        df_kosik = pd.DataFrame(st.session_state["kosik"])
-
-        st.dataframe(df_kosik[[
-            "ITEM",
-            "Počet kusov",
-            "Jednotková cena",
-            "Cena položky spolu",
-        ]])
-
-        celkova_cena_cp = df_kosik["Cena položky spolu"].sum()
-        st.metric("Celková cena CP (bez DPH)", f"{celkova_cena_cp:,.2f} €")
-
-        col_a, col_b = st.columns(2)
-
-        with col_a:
-            if st.button("Uložiť celú ponuku do databázy"):
-                df_archiv = df_kosik[[
-                    "Dátum CP",
-                    "Číslo CP",
-                    "Zákazník",
-                    "Krajina",
-                    "Lojalita",
-                    "ITEM",
-                    "Materiál",
-                    "Akosť",
-                    "d",
-                    "l",
-                    "Hustota",
-                    "Hmotnosť",
-                    "Náročnosť",
-                    "J.cena materiálu",
-                    "Náklad materiál",
-                    "Náklad kooperácia",
-                    "Vstupné náklady",
-                    "Čas (min)",
-                    "Jednotková cena",
-                    "Počet kusov",
-                    "Cena položky spolu",
-                ]]
-                append_to_databaza(df_archiv)
-
-        with col_b:
-            if st.button("Generovať PDF ponuku"):
-                header = {
-                    "datum_cp": datum_cp,
-                    "cislo_cp": cislo_cp,
-                    "zakaznik": zakaznik_nazov,
-                    "krajina": krajina,
-                }
-                pdf_bytes = generate_pdf(df_kosik, header)
-                st.download_button(
-                    label="Stiahnuť PDF",
-                    data=pdf_bytes,
-                    file_name=f"CP_{cislo_cp}.pdf",
-                    mime="application/pdf",
-                )
-    else:
-        st.info("Košík je zatiaľ prázdny.")
-
-
-if __name__ == "__main__":
-    main()
+                druh_kooper
